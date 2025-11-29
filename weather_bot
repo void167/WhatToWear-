@@ -1,0 +1,163 @@
+import requests
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+from aiogram import F
+import logging
+import asyncio
+
+TOKEN = ""
+WEATHER_API = ""
+
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
+
+
+# ---------- ПОГОДА ----------
+def get_weather(city: str):
+    url = (
+        f"https://api.openweathermap.org/data/2.5/weather?"
+        f"q={city}&appid={WEATHER_API}&units=metric&lang=ru"
+    )
+    res = requests.get(url).json()
+
+    if res.get("main"):
+        temp = res["main"]["temp"]
+        desc = res["weather"][0]["description"]
+        return temp, desc
+    return None, None
+
+
+def get_weather_by_coords(lat, lon):
+    url = (
+        f"https://api.openweathermap.org/data/2.5/weather?"
+        f"lat={lat}&lon={lon}&appid={WEATHER_API}&units=metric&lang=ru"
+    )
+    res = requests.get(url).json()
+
+    if res.get("main"):
+        city = res.get("name", "Неопределенный город")
+        temp = res["main"]["temp"]
+        desc = res["weather"][0]["description"]
+        return city, temp, desc
+    return None, None, None
+
+
+# ---------- СОВЕТЫ ПО ОДЕЖДЕ ----------
+def clothes_advice(temp: float) -> str:
+    if temp <= -15:
+        return "🥶 Очень холодно! Пуховик, термуха, шапка, перчатки."
+    elif -15 < temp <= -5:
+        return "❄️ Холодно. Тёплая куртка, шарф и шапка."
+    elif -5 < temp <= 5:
+        return "🌫 Прохладно. Надень куртку или пальто."
+    elif 5 < temp <= 15:
+        return "🍂 Легкая куртка или худи."
+    elif 15 < temp <= 23:
+        return "😊 Комфортно. Футболка и джинсы норм."
+    else:
+        return "🥵 Жара! Шорты, майка и вода."
+
+
+# ---------- КНОПКИ ----------
+def main_menu():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🌆 Показать погоду по городу", callback_data="by_city")],
+            [InlineKeyboardButton(text="📍 Определить по геолокации", callback_data="by_geo")]
+        ]
+    )
+
+
+def location_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Отправить геолокацию 📍", request_location=True)]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+
+# ---------- ХЕНДЛЕРЫ ----------
+@dp.message(Command("start"))
+async def start(message: types.Message):
+    await message.answer(
+        "Здарова, брат! Я подскажу, что надеть по погоде 😎\n"
+        "Выбери способ:",
+        reply_markup=main_menu()
+    )
+
+
+# --- Inline кнопка: выбор города ---
+@dp.callback_query(F.data == "by_city")
+async def choose_city(call: types.CallbackQuery):
+    await call.message.answer("Введи город, брат 👇")
+    await call.answer()
+
+
+# --- Inline кнопка: геолокация ---
+@dp.callback_query(F.data == "by_geo")
+async def ask_geo(call: types.CallbackQuery):
+    await call.message.answer(
+        "Отправь мне свою локацию, брат 🔥",
+        reply_markup=location_keyboard()
+    )
+    await call.answer()
+
+
+# --- Получение города текстом ---
+@dp.message(F.text)
+async def weather_by_city(message: types.Message):
+    city = message.text.strip()
+    temp, desc = get_weather(city)
+
+    if temp is None:
+        await message.answer("Такой город найти не смог. Попробуй ещё 🙏")
+        return
+
+    advise = clothes_advice(temp)
+
+    await message.answer(
+        f"🌍 Город: {city}\n"
+        f"🌡 Температура: {temp}°C\n"
+        f"☁️ Погодка: {desc}\n\n"
+        f"👕 Совет: {advise}",
+        reply_markup=main_menu()
+    )
+
+
+# --- Получение геолокации ---
+@dp.message(F.location)
+async def weather_by_location(message: types.Message):
+    lat = message.location.latitude
+    lon = message.location.longitude
+
+    city, temp, desc = get_weather_by_coords(lat, lon)
+
+    if temp is None:
+        await message.answer("Не получилось определить погоду. Попробуй позже 👀")
+        return
+
+    advise = clothes_advice(temp)
+
+    await message.answer(
+        f"📍 Место: {city}\n"
+        f"🌡 Температура: {temp}°C\n"
+        f"☁️ Погодка: {desc}\n\n"
+        f"👕 Совет: {advise}",
+        reply_markup=main_menu()
+    )
+
+
+# ---------- СТАРТ ----------
+async def main():
+
+    await dp.start_polling(bot)
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Exit")
